@@ -28,8 +28,9 @@ class Jenkins:
         self,
         *,
         url: str,
-        username: str,
-        password: str,
+        username: str | None = None,
+        password: str | None = None,
+        bearer_token: str | None = None,
         timeout: int = 75,
         verify_ssl: bool = True,
     ) -> None:
@@ -39,7 +40,10 @@ class Jenkins:
         self._crumb_header = None
 
         self._session = requests.Session()
-        self._session.auth = HTTPBasicAuth(username, password)
+        if bearer_token:
+            self._session.headers.update({'Authorization': f'Bearer {bearer_token}'})
+        else:
+            self._session.auth = HTTPBasicAuth(username, password)
         self._session.verify = verify_ssl
 
     def endpoint_url(self, endpoint: str) -> str:

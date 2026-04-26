@@ -1,12 +1,46 @@
+import os
 from typing import Any, Literal
 
 from fastmcp import FastMCP
+from loguru import logger
 from starlette.applications import Starlette
 from starlette.middleware import Middleware as ASGIMiddleware
 
 from mcp_jenkins.core import AuthMiddleware, LifespanContext, lifespan
 
 __all__ = ['mcp']
+
+_auth_provider = None
+
+if os.getenv('JENKINS_MCP_OIDC_ENABLED', 'false').lower() == 'true':
+    from fastmcp.server.auth.oidc_proxy import OIDCProxy
+
+    _discovery_url = os.getenv('JENKINS_MCP_OIDC_DISCOVERY_URL')
+    _client_id = os.getenv('JENKINS_MCP_OIDC_CLIENT_ID')
+    _client_secret = os.getenv('JENKINS_MCP_OIDC_CLIENT_SECRET')
+    _base_url = os.getenv('JENKINS_MCP_BASE_URL')
+
+    if not all([_discovery_url, _client_id, _client_secret, _base_url]):
+        msg = (
+            'OIDC mode requires JENKINS_MCP_OIDC_DISCOVERY_URL, '
+            'JENKINS_MCP_OIDC_CLIENT_ID, JENKINS_MCP_OIDC_CLIENT_SECRET, '
+            'and JENKINS_MCP_BASE_URL to be set.'
+        )
+        raise ValueError(msg)
+
+    _auth_provider = OIDCProxy(
+        config_url=_discovery_url,
+        client_id=_client_id,
+        client_secret=_client_secret,
+        base_url=_base_url,
+        # Disable CIMD (Client-Initiated Metadata Discovery) — the server cannot
+        # reach https://claude.ai to fetch Claude Code's client metadata.
+        # Instead, pre-approve localhost redirect URIs so Claude Code can complete
+        # the PKCE flow without dynamic registration.
+        enable_cimd=False,
+        allowed_client_redirect_uris=['http://localhost:*', 'http://127.0.0.1:*'],
+    )
+    logger.info('OIDC authentication enabled. Discovery URL: {}', _discovery_url)
 
 
 class JenkinsMCP(FastMCP[LifespanContext]):
@@ -27,7 +61,7 @@ class JenkinsMCP(FastMCP[LifespanContext]):
         return super().http_app(path=path, middleware=final_middleware_list, transport=transport, **kwargs)
 
 
-mcp = JenkinsMCP('mcp-jenkins', lifespan=lifespan)
+mcp = JenkinsMCP('mcp-jenkins', lifespan=lifespan, auth=_auth_provider)
 
 # Import tool modules to register them with the MCP server
 # This must happen after mcp is created so the @mcp.tool() decorators can reference it

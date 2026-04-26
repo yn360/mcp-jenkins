@@ -58,6 +58,15 @@ if sys.platform == 'win32':
     default=9887,
     help='Port to listen on for SSE or Streamable HTTP transport',
 )
+@click.option(
+    '--oidc-enabled/--no-oidc-enabled',
+    default=False,
+    help='Enable Keycloak OIDC authentication for the MCP server',
+)
+@click.option('--oidc-discovery-url', default=None, help='OIDC provider discovery URL')
+@click.option('--oidc-client-id', default=None, help='OIDC client ID')
+@click.option('--oidc-client-secret', default=None, help='OIDC client secret')
+@click.option('--oidc-base-url', default=None, help='Public base URL of this MCP server (used for OAuth callback)')
 def main(
     jenkins_url: str,
     jenkins_username: str,
@@ -70,6 +79,11 @@ def main(
     transport: str,
     host: str,
     port: int,
+    oidc_enabled: bool,  # noqa: FBT001
+    oidc_discovery_url: str | None,
+    oidc_client_id: str | None,
+    oidc_client_secret: str | None,
+    oidc_base_url: str | None,
 ) -> None:
     if jenkins_url:
         os.environ['jenkins_url'] = jenkins_url
@@ -81,6 +95,17 @@ def main(
     os.environ['jenkins_timeout'] = str(jenkins_timeout)
     os.environ['jenkins_verify_ssl'] = str(jenkins_verify_ssl).lower()
     os.environ['jenkins_session_singleton'] = str(jenkins_session_singleton).lower()
+
+    if oidc_enabled:
+        os.environ['JENKINS_MCP_OIDC_ENABLED'] = 'true'
+    if oidc_discovery_url:
+        os.environ['JENKINS_MCP_OIDC_DISCOVERY_URL'] = oidc_discovery_url
+    if oidc_client_id:
+        os.environ['JENKINS_MCP_OIDC_CLIENT_ID'] = oidc_client_id
+    if oidc_client_secret:
+        os.environ['JENKINS_MCP_OIDC_CLIENT_SECRET'] = oidc_client_secret
+    if oidc_base_url:
+        os.environ['JENKINS_MCP_BASE_URL'] = oidc_base_url
 
     from mcp_jenkins.server import mcp
 

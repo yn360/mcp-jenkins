@@ -21,6 +21,8 @@ class LifespanContext(BaseModel):
 
     jenkins_session_singleton: bool = True
 
+    oidc_enabled: bool = False  # OIDC gates MCP access only; Jenkins always uses service account credentials
+
 
 @asynccontextmanager
 async def lifespan(app: FastMCP[LifespanContext]) -> AsyncIterator['LifespanContext']:
@@ -31,6 +33,7 @@ async def lifespan(app: FastMCP[LifespanContext]) -> AsyncIterator['LifespanCont
     jenkins_timeout = int(os.getenv('jenkins_timeout', '5'))
     jenkins_verify_ssl = os.getenv('jenkins_verify_ssl', 'true').lower() == 'true'
     jenkins_session_singleton = os.getenv('jenkins_session_singleton', 'true').lower() == 'true'
+    oidc_enabled = os.getenv('JENKINS_MCP_OIDC_ENABLED', 'false').lower() == 'true'
 
     yield LifespanContext(
         jenkins_url=jenkins_url,
@@ -39,11 +42,15 @@ async def lifespan(app: FastMCP[LifespanContext]) -> AsyncIterator['LifespanCont
         jenkins_timeout=jenkins_timeout,
         jenkins_verify_ssl=jenkins_verify_ssl,
         jenkins_session_singleton=jenkins_session_singleton,
+        oidc_enabled=oidc_enabled,
     )
 
 
 def jenkins(ctx: Context) -> Jenkins:
-    if ctx.request_context.lifespan_context.jenkins_session_singleton and getattr(ctx.session, 'jenkins', None):
+    if (
+        ctx.request_context.lifespan_context.jenkins_session_singleton
+        and getattr(ctx.session, 'jenkins', None)
+    ):
         return ctx.session.jenkins
 
     jenkins_url = ctx.request_context.lifespan_context.jenkins_url
@@ -54,11 +61,11 @@ def jenkins(ctx: Context) -> Jenkins:
     jenkins_verify_ssl = ctx.request_context.lifespan_context.jenkins_verify_ssl
 
     try:
-        requests = get_http_request()
+        http_request = get_http_request()
 
-        jenkins_url = getattr(requests.state, 'jenkins_url', None) or jenkins_url
-        jenkins_username = getattr(requests.state, 'jenkins_username', None) or jenkins_username
-        jenkins_password = getattr(requests.state, 'jenkins_password', None) or jenkins_password
+        jenkins_url = getattr(http_request.state, 'jenkins_url', None) or jenkins_url
+        jenkins_username = getattr(http_request.state, 'jenkins_username', None) or jenkins_username
+        jenkins_password = getattr(http_request.state, 'jenkins_password', None) or jenkins_password
 
         logger.debug(f'Retrieved Jenkins auth from request state - url: {jenkins_url}, username: {jenkins_username}')
     except RuntimeError as e:
@@ -68,11 +75,19 @@ def jenkins(ctx: Context) -> Jenkins:
             f'Unexpected error retrieving Jenkins auth from request, falling back to environment variables: {e}'
         )
 
-    if not all((jenkins_url, jenkins_username, jenkins_password)):
+    if not jenkins_url:
+        msg = (
+            'Jenkins URL is missing. '
+            'Please provide it via x-jenkins-url header '
+            'or CLI argument (--jenkins-url).'
+        )
+        raise ValueError(msg)
+
+    if not all((jenkins_username, jenkins_password)):
         msg = (
             'Jenkins authentication details are missing. '
             'Please provide them via x-jenkins-* headers '
-            'or CLI arguments (--jenkins-url, --jenkins-username, --jenkins-password).'
+            'or CLI arguments (--jenkins-username, --jenkins-password).'
         )
         raise ValueError(msg)
 
@@ -80,7 +95,6 @@ def jenkins(ctx: Context) -> Jenkins:
         f'Creating Jenkins client with url: '
         f'{jenkins_url}, username: {jenkins_username}, timeout: {jenkins_timeout}, verify_ssl: {jenkins_verify_ssl}'
     )
-
     ctx.session.jenkins = Jenkins(
         url=jenkins_url,
         username=jenkins_username,
