@@ -19,6 +19,12 @@ if os.getenv('JENKINS_MCP_OIDC_ENABLED', 'false').lower() == 'true':
     _client_id = os.getenv('JENKINS_MCP_OIDC_CLIENT_ID')
     _client_secret = os.getenv('JENKINS_MCP_OIDC_CLIENT_SECRET')
     _base_url = os.getenv('JENKINS_MCP_BASE_URL')
+    # Comma-separated redirect URI patterns MCP clients may register, e.g. Claude Desktop's
+    # claude://claude.ai/mcp-auth-callback/* next to Claude Code's localhost callback.
+    _allowed_redirect_uris_env = os.getenv(
+        'JENKINS_MCP_OIDC_ALLOWED_REDIRECT_URIS', 'http://localhost:*,http://127.0.0.1:*'
+    )
+    _allowed_redirect_uris = [uri.strip() for uri in _allowed_redirect_uris_env.split(',') if uri.strip()]
 
     if not all([_discovery_url, _client_id, _client_secret, _base_url]):
         msg = (
@@ -35,10 +41,10 @@ if os.getenv('JENKINS_MCP_OIDC_ENABLED', 'false').lower() == 'true':
         base_url=_base_url,
         # Disable CIMD (Client-Initiated Metadata Discovery) — the server cannot
         # reach https://claude.ai to fetch Claude Code's client metadata.
-        # Instead, pre-approve localhost redirect URIs so Claude Code can complete
+        # Instead, pre-approve the allowed redirect URIs so clients can complete
         # the PKCE flow without dynamic registration.
         enable_cimd=False,
-        allowed_client_redirect_uris=['http://localhost:*', 'http://127.0.0.1:*'],
+        allowed_client_redirect_uris=_allowed_redirect_uris,
     )
     logger.info('OIDC authentication enabled. Discovery URL: {}', _discovery_url)
 
